@@ -919,9 +919,9 @@ textarea { resize: vertical; min-height: 80px; }
           <label>Modelo IA</label>
           <select id="cfg-gemini-model" style="max-width:240px">
             <option value="gemini-1.5-flash">Gemini 1.5 Flash (Gratis Recomendado)</option>
+            <option value="gemini-1.5-flash-latest">Gemini 1.5 Flash (Última Versión)</option>
             <option value="gemini-1.5-flash-8b">Gemini 1.5 Flash 8B (Rápido Gratis)</option>
-            <option value="gemini-1.5-pro">Gemini 1.5 Pro (Gratis)</option>
-            <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+            <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash Experimental</option>
           </select>
         </div>
         <button class="btn btn-primary" onclick="saveApiKey()">💾 Guardar Configuración IA</button>
@@ -1933,6 +1933,20 @@ async function buildContext() {
 - Finanzas: Ingresos $${Math.round(totalI).toLocaleString()} ARS | Gastos $${Math.round(totalG).toLocaleString()} ARS | Balance $${Math.round(totalI-totalG).toLocaleString()} ARS`;
 }
 
+async function getWorkingModelList(apiKey) {
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+    if (res.ok) {
+      const data = await res.json();
+      const valid = (data.models || [])
+        .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
+        .map(m => m.name.replace('models/', ''));
+      if (valid.length > 0) return valid;
+    }
+  } catch (e) {}
+  return ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash-8b', 'gemini-2.0-flash-exp'];
+}
+
 async function sendChat() {
   const input    = document.getElementById('chat-input');
   const pregunta = input.value.trim();
@@ -1971,7 +1985,9 @@ PREGUNTA DEL PRODUCTOR: ${pregunta}
 Respondé directamente con los datos disponibles. Si no hay suficientes datos, decilo claramente y sugerí qué registrar.`;
 
     const modelSaved = localStorage.getItem('gemini_model') || 'gemini-1.5-flash';
-    const modelos = [modelSaved, 'gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-1.5-pro'].filter((v, i, a) => a.indexOf(v) === i);
+    const validModels = await getWorkingModelList(apiKey);
+    const modelos = [modelSaved, ...validModels].filter((v, i, a) => a.indexOf(v) === i);
+
     let resp = null;
     let errUltimo = null;
 
