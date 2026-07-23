@@ -1976,20 +1976,20 @@ async function sendChat() {
 
   try {
     const contexto = await buildContext();
-    const prompt = `Sos un asistente ganadero experto para productores de hacienda en Argentina.
-
-${contexto}
-
-PREGUNTA DEL PRODUCTOR: ${pregunta}
-
-INSTRUCCIONES DE RESPUESTA:
-- Respondé en español claro, conciso, directo y útil.
-- Basate SOLO en los datos reales del establecimiento proporcionados.
-- REGLA OBLIGATORIA: Escribí ÚNICAMENTE el mensaje final dirigido al usuario en español. NO incluyas notas de rol, pensamientos internos en inglés, borradores (* Role:, * Language:, * Constraint:) ni metacomentarios.`;
-
     const modelSaved = localStorage.getItem('gemini_model') || 'gemini-1.5-flash';
     const validModels = await getWorkingModelList(apiKey);
     const modelos = [modelSaved, ...validModels].filter((v, i, a) => a.indexOf(v) === i);
+
+    const requestBody = {
+      systemInstruction: {
+        parts: [{ text: "Sos un asistente ganadero experto para productores de hacienda en Argentina. Tu única función es responder las dudas del usuario en español de forma clara y directa. Queda estrictamente prohibido incluir razonamientos internos, notas de rol, borradores (* Role:, * Language:) o metadatos en inglés." }]
+      },
+      contents: [
+        {
+          parts: [{ text: `${contexto}\n\nPREGUNTA DEL PRODUCTOR: ${pregunta}` }]
+        }
+      ]
+    };
 
     let resp = null;
     let errUltimo = null;
@@ -2001,7 +2001,7 @@ INSTRUCCIONES DE RESPUESTA:
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+            body: JSON.stringify(requestBody)
           }
         );
         if (r.ok) {
@@ -2025,39 +2025,40 @@ INSTRUCCIONES DE RESPUESTA:
     }
 
     const data = await resp.json();
-    const textoBruto = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sin respuesta del modelo.';
+    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sin respuesta del modelo.';
 
-    // Extraer estrictamente el texto final descartando bloques de pensamiento (líneas que empiezan con *)
-    const lineas = textoBruto.split('\n');
-    let lineasRespuesta = [];
-    let enRespuestaFinal = false;
-
-    for (const l of lineas) {
-      const t = l.trim();
-      // Si encontramos una línea entre comillas o texto en español plano sin punto de viñeta inicial de razonamiento
-      if (t.startsWith('"') && t.endsWith('"') && t.length > 20) {
-        lineasRespuesta.push(t.slice(1, -1));
-        enRespuestaFinal = true;
-      } else if (!t.startsWith('*') && !t.startsWith('👤') && !t.startsWith('🤖') && t.length > 0) {
-        lineasRespuesta.push(l);
-        enRespuestaFinal = true;
-      } else if (enRespuestaFinal && t.startsWith('*') && !t.includes(':')) {
-        // Viñeta de la respuesta final del usuario
-        lineasRespuesta.push(l);
+    // Extractor de respuesta final
+    let textoLimpio = '';
+    
+    // 1. Extraer la frase entre comillas si el modelo la colocó al final de su pensamiento
+    const matchesComillas = [...raw.matchAll(/"([^"\n]{15,}(?:\n[^"\n]{5,})*)"/g)];
+    if (matchesComillas.length > 0) {
+      const ultimaComilla = matchesComillas[matchesComillas.length - 1][1].trim();
+      if (ultimaComilla.length > 15 && !ultimaComilla.startsWith('*')) {
+        textoLimpio = ultimaComilla;
       }
     }
 
-    let textoLimpio = lineasRespuesta.join('\n').trim();
-    
-    // Si por alguna razón el parser vació el texto, quitar de forma agresiva todo lo que tenga formato de metadato "* Key:"
+    // 2. Si no hay comillas de respuesta, filtrar todas las líneas de metadatos/viñetas (* Role:, * Current Date:, etc.)
     if (!textoLimpio) {
-      textoLimpio = lineas
-        .filter(l => !/^\s*\*\s*[A-Z][a-zA-Z\s-]+\s*:/.test(l) && !/^\s*[👤🤖]/.test(l))
-        .join('\n')
-        .trim();
+      const lineas = raw.split('\n');
+      const filtradas = lineas.filter(l => {
+        const t = l.trim();
+        if (!t) return false;
+        if (/^\*\s*(Role|Current|Establishment|Stock|Gender|Weights|Births|Health|Finance|User|Greeting|Urgent|Upcoming|Spanish|Clear|No role|Tone|Constraint|Language|Drafting|Self-Correction|Decision|Refined|Response|The user|Input|Sum of|Count of|Direct answer):/i.test(t)) return false;
+        if (/^\*\s*(Spanish language|Clear, concise|No role notes|The user just|As an expert)/i.test(t)) return false;
+        return true;
+      });
+
+      textoLimpio = filtradas.join('\n').trim();
+      if (textoLimpio.startsWith('* "') && textoLimpio.endsWith('"')) {
+        textoLimpio = textoLimpio.slice(3, -1).trim();
+      } else if (textoLimpio.startsWith('"') && textoLimpio.endsWith('"')) {
+        textoLimpio = textoLimpio.slice(1, -1).trim();
+      }
     }
 
-    if (!textoLimpio) textoLimpio = textoBruto.trim();
+    if (!textoLimpio) textoLimpio = raw.trim();
 
     document.getElementById(tid).querySelector('.chat-bubble').innerHTML =
       textoLimpio.replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');
