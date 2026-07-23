@@ -630,7 +630,7 @@ textarea { resize: vertical; min-height: 80px; }
         <table>
           <thead><tr>
             <th>Caravana</th><th>Categoría</th><th>Raza</th><th>Sexo</th>
-            <th>Edad</th><th>Potrero</th><th>Último Peso</th><th>Acciones</th>
+            <th>Edad</th><th>Potrero</th><th>Último Peso</th><th>Val. Est. ($)</th><th>Acciones</th>
           </tr></thead>
           <tbody id="tabla-animales"></tbody>
         </table>
@@ -801,6 +801,39 @@ textarea { resize: vertical; min-height: 80px; }
           <input type="text" id="cfg-localidad" placeholder="Ej: Gualeguaychú, Entre Ríos">
         </div>
         <button class="btn btn-primary" onclick="saveConfig()">💾 Guardar</button>
+      </div>
+
+      <div class="settings-section">
+        <h3>💵 Precios de Referencia Ganaderos ($/kg)</h3>
+        <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:14px">
+          Configurá los precios de mercado estimados por kilo vivo para la valuación del rodeo y alertas de venta óptima.
+        </p>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Ternero/a (&lt;200 kg) — $/kg</label>
+            <input type="number" id="cfg-precio-ternero" placeholder="2800">
+          </div>
+          <div class="form-group">
+            <label>Novillito / Vaquillona (200-380 kg) — $/kg</label>
+            <input type="number" id="cfg-precio-novillito" placeholder="2400">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Novillo (380-430 kg) — $/kg</label>
+            <input type="number" id="cfg-precio-novillo" placeholder="2200">
+          </div>
+          <div class="form-group">
+            <label>Pesados / Vaca / Toro (&gt;430 kg) — $/kg</label>
+            <input type="number" id="cfg-precio-pesado" placeholder="1900">
+          </div>
+        </div>
+        <div class="settings-row">
+          <label>Límite Peso Óptimo (kg)</label>
+          <input type="number" id="cfg-tope-peso" placeholder="420" style="max-width:180px">
+          <span style="font-size:0.75rem;color:var(--text-muted)">Peso tope recomendado antes de penalización</span>
+        </div>
+        <button class="btn btn-primary" onclick="saveConfig()">💾 Guardar Precios</button>
       </div>
 
       <div class="settings-section">
@@ -1262,6 +1295,34 @@ async function renderDashboard() {
   const partosAnio = partos.filter(p => new Date(p.fecha) >= unAnio);
   const tasaP = hembras.length ? Math.round(partosAnio.length / hembras.length * 100) : 0;
 
+  const cfg = JSON.parse(localStorage.getItem('hacienda_config') || '{}');
+  const topePeso = parseFloat(cfg.topePeso || 420);
+  let valuacionTotal = 0;
+  const alertasVentaOptima = [];
+
+  activos.forEach(a => {
+    const pp = pesajes.filter(p => p.animal_id === a.id).sort((x,y) => y.fecha.localeCompare(x.fecha));
+    const pesoVal = pp[0]?.peso_kg || null;
+    if (pesoVal) {
+      const precioK = getPrecioKilo(pesoVal, cfg);
+      valuacionTotal += (pesoVal * precioK);
+
+      if (['Novillo','Novillito','Vaquillona','Ternero','Ternera'].includes(a.categoria)) {
+        if (pesoVal >= topePeso - 30 && pesoVal <= topePeso) {
+          alertasVentaOptima.push({
+            tipo: 'yellow',
+            msg: `🏷️ ${a.caravana} (${a.categoria}, ${pesoVal} kg): En ventana de venta óptima (límite de ${topePeso} kg).`
+          });
+        } else if (pesoVal > topePeso) {
+          alertasVentaOptima.push({
+            tipo: 'red',
+            msg: `⚠️ ${a.caravana} (${a.categoria}, ${pesoVal} kg): Superó el peso óptimo recomendado (${topePeso} kg).`
+          });
+        }
+      }
+    }
+  });
+
   const mes = hoy.slice(0,7);
   const gastoMes   = costos.filter(c => c.tipo==='Gasto'   && c.fecha.startsWith(mes)).reduce((s,c)=>s+c.monto,0);
   const ingresoMes = costos.filter(c => c.tipo==='Ingreso' && c.fecha.startsWith(mes)).reduce((s,c)=>s+c.monto,0);
@@ -1269,6 +1330,7 @@ async function renderDashboard() {
   document.getElementById('kpi-grid').innerHTML = `
     <div class="kpi-card green"><div class="kpi-icon">🐄</div><div class="kpi-label">Stock Activo</div><div class="kpi-value">${activos.length}</div><div class="kpi-sub">${hembras.length} hembras · ${activos.length - hembras.length} machos</div></div>
     <div class="kpi-card blue"><div class="kpi-icon">⚖️</div><div class="kpi-label">Peso Promedio</div><div class="kpi-value">${pesoPromedio}</div><div class="kpi-sub">kg · ${conPeso.length} animales pesados</div></div>
+    <div class="kpi-card purple"><div class="kpi-icon">💎</div><div class="kpi-label">Valuación del Rodeo</div><div class="kpi-value">${valuacionTotal > 0 ? '$'+Math.round(valuacionTotal).toLocaleString('es-AR') : '—'}</div><div class="kpi-sub">ARS estimado mercado</div></div>
     <div class="kpi-card warn"><div class="kpi-icon">💉</div><div class="kpi-label">Sanidad Vencida</div><div class="kpi-value">${vencidas.length}</div><div class="kpi-sub">${proximas7.length} vencen en 7 días</div></div>
     <div class="kpi-card purple"><div class="kpi-icon">🍼</div><div class="kpi-label">Partos (12m)</div><div class="kpi-value">${partosAnio.length}</div><div class="kpi-sub">Tasa aprox. ${tasaP}%</div></div>
     <div class="kpi-card green"><div class="kpi-icon">💰</div><div class="kpi-label">Ingresos (mes)</div><div class="kpi-value">${ingresoMes > 0 ? '$'+ingresoMes.toLocaleString('es-AR') : '—'}</div><div class="kpi-sub">ARS</div></div>
@@ -1330,6 +1392,9 @@ async function renderDashboard() {
 
   // Alertas
   let alertasHTML = '';
+  alertasVentaOptima.forEach(al => {
+    alertasHTML += `<div class="alert-item ${al.tipo}"><div class="alert-dot"></div>${al.msg}</div>`;
+  });
   vencidas.slice(0,4).forEach(s => {
     const a = animales.find(x => x.id === s.animal_id);
     alertasHTML += `<div class="alert-item red"><div class="alert-dot"></div>💉 ${a?.caravana||'?'}: ${s.tipo} vencida el ${fmtDate(s.proxima_fecha)}</div>`;
@@ -1383,9 +1448,11 @@ async function renderAnimales() {
     a.caravana?.toLowerCase().includes(search) || a.raza?.toLowerCase().includes(search));
   if (catFil) lista = lista.filter(a => a.categoria === catFil);
 
+  const cfg = JSON.parse(localStorage.getItem('hacienda_config') || '{}');
+
   const tbody = document.getElementById('tabla-animales');
   if (!lista.length) {
-    tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><div class="icon">🐄</div><p>Sin animales. Agregá tu primer animal con el botón de arriba.</p></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><div class="icon">🐄</div><p>Sin animales. Agregá tu primer animal con el botón de arriba.</p></div></td></tr>';
     return;
   }
 
@@ -1394,7 +1461,11 @@ async function renderAnimales() {
 
   tbody.innerHTML = lista.map(a => {
     const pesos = pesajes.filter(p => p.animal_id === a.id).sort((x,y) => y.fecha.localeCompare(x.fecha));
-    const peso  = pesos[0] ? pesos[0].peso_kg + ' kg' : '—';
+    const pesoNum = pesos[0]?.peso_kg || null;
+    const peso  = pesoNum ? pesoNum + ' kg' : '—';
+    const precioK = pesoNum ? getPrecioKilo(pesoNum, cfg) : 0;
+    const valEst = pesoNum ? Math.round(pesoNum * precioK) : 0;
+    const valStr = valEst > 0 ? '$' + valEst.toLocaleString('es-AR') : '—';
     const cls   = catClass[a.categoria] || 'badge-gray';
     return `<tr>
       <td><strong>${a.caravana}</strong></td>
@@ -1404,6 +1475,7 @@ async function renderAnimales() {
       <td>${calcEdad(a.fecha_nacimiento) || '—'}</td>
       <td>${a.potrero_actual || '—'}</td>
       <td>${peso}</td>
+      <td><strong>${valStr}</strong></td>
       <td><div class="action-btns">
         <button class="btn btn-secondary btn-sm" onclick="editarAnimal(${a.id})">✏️</button>
         <button class="btn btn-danger btn-sm" onclick="eliminarAnimal(${a.id})">🗑️</button>
@@ -1834,12 +1906,34 @@ Respondé directamente con los datos disponibles. Si no hay suficientes datos, d
 // ════════════════════════════════════════════════════
 //   AJUSTES
 // ════════════════════════════════════════════════════
+function getPrecioKilo(peso, cfg = {}) {
+  const pTernero   = parseFloat(cfg.precioTernero   || 2800);
+  const pNovillito = parseFloat(cfg.precioNovillito || 2400);
+  const pNovillo   = parseFloat(cfg.precioNovillo   || 2200);
+  const pPesado    = parseFloat(cfg.precioPesado    || 1900);
+
+  if (!peso || peso <= 0) return 0;
+  if (peso < 200) return pTernero;
+  if (peso < 380) return pNovillito;
+  if (peso <= 430) return pNovillo;
+  return pPesado;
+}
+
 function loadConfig() {
   const cfg = JSON.parse(localStorage.getItem('hacienda_config') || '{}');
   document.getElementById('cfg-nombre').value      = cfg.nombre      || '';
   document.getElementById('cfg-renspa').value      = cfg.renspa      || '';
   document.getElementById('cfg-propietario').value = cfg.propietario || '';
   document.getElementById('cfg-localidad').value   = cfg.localidad   || '';
+
+  const pt = document.getElementById('cfg-precio-ternero');
+  if (pt) {
+    pt.value = cfg.precioTernero   || '2800';
+    document.getElementById('cfg-precio-novillito').value = cfg.precioNovillito || '2400';
+    document.getElementById('cfg-precio-novillo').value   = cfg.precioNovillo   || '2200';
+    document.getElementById('cfg-precio-pesado').value    = cfg.precioPesado    || '1900';
+    document.getElementById('cfg-tope-peso').value        = cfg.topePeso        || '420';
+  }
 
   const key      = localStorage.getItem('gemini_api_key') || '';
   const inputKey = document.getElementById('cfg-apikey');
@@ -1851,10 +1945,15 @@ function loadConfig() {
 
 function saveConfig() {
   const cfg = {
-    nombre:      document.getElementById('cfg-nombre').value,
-    renspa:      document.getElementById('cfg-renspa').value,
-    propietario: document.getElementById('cfg-propietario').value,
-    localidad:   document.getElementById('cfg-localidad').value,
+    nombre:          document.getElementById('cfg-nombre').value,
+    renspa:          document.getElementById('cfg-renspa').value,
+    propietario:     document.getElementById('cfg-propietario').value,
+    localidad:       document.getElementById('cfg-localidad').value,
+    precioTernero:   document.getElementById('cfg-precio-ternero')?.value || '2800',
+    precioNovillito: document.getElementById('cfg-precio-novillito')?.value || '2400',
+    precioNovillo:   document.getElementById('cfg-precio-novillo')?.value || '2200',
+    precioPesado:    document.getElementById('cfg-precio-pesado')?.value || '1900',
+    topePeso:        document.getElementById('cfg-tope-peso')?.value || '420',
   };
   localStorage.setItem('hacienda_config', JSON.stringify(cfg));
   toast('Configuración guardada ✅');
