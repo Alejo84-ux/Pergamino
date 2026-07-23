@@ -519,12 +519,72 @@ textarea { resize: vertical; min-height: 80px; }
 .empty-state .icon { font-size: 2.5rem; margin-bottom: 12px; }
 .empty-state p { font-size: 0.85rem; }
 
+/* ──────────────── MOBILE HEADER ──────────────── */
+#mobile-header {
+  display: none;
+  height: 56px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 90;
+  align-items: center;
+  padding: 0 16px;
+  gap: 12px;
+}
+#mobile-header h2 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+#mobile-menu-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 1.2rem;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+#sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+  z-index: 99;
+}
+
 /* ──────────────── RESPONSIVE ──────────────── */
 @media (max-width: 900px) {
-  #sidebar { width: 60px; min-width: 60px; }
+  #mobile-header { display: flex; }
+  #sidebar-overlay.active { display: block; }
+
+  #sidebar {
+    width: 260px;
+    min-width: 260px;
+    transform: translateX(-100%);
+    box-shadow: var(--shadow);
+    z-index: 100;
+  }
+  #sidebar.open {
+    transform: translateX(0);
+  }
+
   #sidebar .sidebar-logo p, #sidebar .nav-item span,
-  #sidebar .nav-section, #sidebar .sidebar-footer { display: none; }
-  #main { margin-left: 60px; }
+  #sidebar .nav-section, #sidebar .sidebar-footer { display: block !important; }
+
+  #main {
+    margin-left: 0;
+    padding-top: 56px;
+  }
+  .page-header {
+    padding: 16px 20px 0;
+  }
+  .page-content {
+    padding: 16px 20px 30px;
+  }
   .grid-2 { grid-template-columns: 1fr; }
   .form-row { grid-template-columns: 1fr; }
 }
@@ -535,6 +595,13 @@ textarea { resize: vertical; min-height: 80px; }
 </style>
 </head>
 <body>
+
+<!-- ══ MOBILE HEADER ══ -->
+<div id="mobile-header">
+  <button id="mobile-menu-btn" onclick="toggleSidebar()">☰</button>
+  <h2>🐄 HaciendaApp</h2>
+</div>
+<div id="sidebar-overlay" onclick="toggleSidebar(false)"></div>
 
 <!-- ══ SIDEBAR ══ -->
 <nav id="sidebar">
@@ -1181,13 +1248,29 @@ const dbDel = (store, id) => new Promise((res, rej) => {
 });
 
 // ════════════════════════════════════════════════════
-//   Navegación
+//   Navegación & Mobile Drawer
 // ════════════════════════════════════════════════════
+function toggleSidebar(forceState) {
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (!sidebar || !overlay) return;
+  const isOpen = forceState !== undefined ? forceState : !sidebar.classList.contains('open');
+  if (isOpen) {
+    sidebar.classList.add('open');
+    overlay.classList.add('active');
+  } else {
+    sidebar.classList.remove('open');
+    overlay.classList.remove('active');
+  }
+}
+
 function navigate(view, el) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('view-' + view).classList.add('active');
   if (el) el.classList.add('active');
+  if (window.innerWidth <= 900) toggleSidebar(false);
+
   if (view === 'dashboard') renderDashboard();
   if (view === 'animales')  renderAnimales();
   if (view === 'pesajes')   { fillSelectsAnimales(); renderPesajes(); }
@@ -1878,18 +1961,34 @@ PREGUNTA DEL PRODUCTOR: ${pregunta}
 
 Respondé directamente con los datos disponibles. Si no hay suficientes datos, decilo claramente y sugerí qué registrar.`;
 
-    const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-      }
-    );
+    const modelos = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-exp'];
+    let resp = null;
+    let errUltimo = null;
 
-    if (!resp.ok) {
-      const err = await resp.json();
-      throw new Error(err.error?.message || `HTTP ${resp.status}`);
+    for (const mod of modelos) {
+      try {
+        const r = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${mod}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+          }
+        );
+        if (r.ok) {
+          resp = r;
+          break;
+        } else {
+          const eData = await r.json();
+          errUltimo = eData.error?.message || `HTTP ${r.status}`;
+        }
+      } catch (err) {
+        errUltimo = err.message;
+      }
+    }
+
+    if (!resp) {
+      throw new Error(errUltimo || 'Sin cuota en el modelo seleccionado.');
     }
 
     const data = await resp.json();
