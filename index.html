@@ -1976,13 +1976,16 @@ async function sendChat() {
 
   try {
     const contexto = await buildContext();
-    const prompt = `Sos un asistente ganadero experto para productores argentinos. Respondé en español de forma clara, concisa y útil, basándote SOLO en los datos reales del establecimiento que te proporciono.
+    const prompt = `Sos un asistente ganadero experto para productores de hacienda en Argentina.
 
 ${contexto}
 
 PREGUNTA DEL PRODUCTOR: ${pregunta}
 
-Respondé directamente con los datos disponibles. Si no hay suficientes datos, decilo claramente y sugerí qué registrar.`;
+INSTRUCCIONES DE RESPUESTA:
+- Respondé en español claro, conciso, directo y útil.
+- Basate SOLO en los datos reales del establecimiento proporcionados.
+- REGLA OBLIGATORIA: Escribí ÚNICAMENTE el mensaje final dirigido al usuario en español. NO incluyas notas de rol, pensamientos internos en inglés, borradores (* Role:, * Language:, * Constraint:) ni metacomentarios.`;
 
     const modelSaved = localStorage.getItem('gemini_model') || 'gemini-1.5-flash';
     const validModels = await getWorkingModelList(apiKey);
@@ -2022,9 +2025,24 @@ Respondé directamente con los datos disponibles. Si no hay suficientes datos, d
     }
 
     const data = await resp.json();
-    const texto = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sin respuesta del modelo.';
+    const textoBruto = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sin respuesta del modelo.';
+
+    // Filtro para eliminar bloques de pensamiento en inglés (* Role:, * Tone:, etc.)
+    const lineasFiltradas = textoBruto.split('\n').filter(l => {
+      const t = l.trim();
+      return !(t.startsWith('* Role:') || t.startsWith('* Tone:') || t.startsWith('* Constraint:') ||
+               t.startsWith('* Language:') || t.startsWith('* Input Data') || t.startsWith('* User Input') ||
+               t.startsWith('* Greeting') || t.startsWith('* Drafting') || t.startsWith('* Self-Correction') ||
+               t.startsWith('* Decision') || t.startsWith('* Refined') || t.startsWith('* Response strategy') ||
+               t.startsWith('* Sum of') || t.startsWith('* Count of') || t.startsWith('* Direct answer') ||
+               t.startsWith('👤') || t.startsWith('🤖'));
+    });
+
+    let textoLimpio = lineasFiltradas.join('\n').trim();
+    if (!textoLimpio) textoLimpio = textoBruto.trim();
+
     document.getElementById(tid).querySelector('.chat-bubble').innerHTML =
-      texto.replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');
+      textoLimpio.replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');
   } catch (err) {
     document.getElementById(tid).querySelector('.chat-bubble').innerHTML =
       `❌ Error: ${err.message}`;
