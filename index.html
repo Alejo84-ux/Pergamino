@@ -915,7 +915,16 @@ textarea { resize: vertical; min-height: 80px; }
           <input type="text" id="cfg-apikey" placeholder="AIza..." autocomplete="off">
           <span id="apikey-status" class="api-key-status unset">⚠️ No configurada</span>
         </div>
-        <button class="btn btn-primary" onclick="saveApiKey()">💾 Guardar API Key</button>
+        <div class="settings-row">
+          <label>Modelo IA</label>
+          <select id="cfg-gemini-model" style="max-width:240px">
+            <option value="gemini-1.5-flash">Gemini 1.5 Flash (Gratis Recomendado)</option>
+            <option value="gemini-1.5-flash-8b">Gemini 1.5 Flash 8B (Rápido Gratis)</option>
+            <option value="gemini-1.5-pro">Gemini 1.5 Pro (Gratis)</option>
+            <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="saveApiKey()">💾 Guardar Configuración IA</button>
       </div>
 
       <div class="settings-section" style="border-color:rgba(59,130,246,0.4);background:linear-gradient(135deg,rgba(59,130,246,0.05),var(--bg-card))">
@@ -1961,7 +1970,8 @@ PREGUNTA DEL PRODUCTOR: ${pregunta}
 
 Respondé directamente con los datos disponibles. Si no hay suficientes datos, decilo claramente y sugerí qué registrar.`;
 
-    const modelos = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-exp'];
+    const modelSaved = localStorage.getItem('gemini_model') || 'gemini-1.5-flash';
+    const modelos = [modelSaved, 'gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-1.5-pro'].filter((v, i, a) => a.indexOf(v) === i);
     let resp = null;
     let errUltimo = null;
 
@@ -1988,7 +1998,11 @@ Respondé directamente con los datos disponibles. Si no hay suficientes datos, d
     }
 
     if (!resp) {
-      throw new Error(errUltimo || 'Sin cuota en el modelo seleccionado.');
+      if (errUltimo && (errUltimo.includes('Quota exceeded') || errUltimo.includes('limit: 0'))) {
+        throw new Error('La API Key ingresada no tiene cuota activada en ese proyecto de Google Cloud. Creá una clave gratuita en <a href="https://aistudio.google.com" target="_blank" style="color:var(--accent2)">aistudio.google.com</a> haciendo clic en "Get API Key" → "Create API Key in new project".');
+      } else {
+        throw new Error(errUltimo || 'Sin respuesta de Gemini.');
+      }
     }
 
     const data = await resp.json();
@@ -2040,6 +2054,9 @@ function loadConfig() {
   inputKey.value = key ? '••••••••••••••••' : '';
   if (key) { status.textContent = '✅ Configurada'; status.className = 'api-key-status set'; }
   else      { status.textContent = '⚠️ No configurada'; status.className = 'api-key-status unset'; }
+
+  const gm = document.getElementById('cfg-gemini-model');
+  if (gm) gm.value = localStorage.getItem('gemini_model') || 'gemini-1.5-flash';
 }
 
 function saveConfig() {
@@ -2060,15 +2077,17 @@ function saveConfig() {
 
 function saveApiKey() {
   const key = document.getElementById('cfg-apikey').value.trim();
+  const model = document.getElementById('cfg-gemini-model')?.value || 'gemini-1.5-flash';
+  localStorage.setItem('gemini_model', model);
+
   if (!key) {
     localStorage.removeItem('gemini_api_key');
-    toast('API Key eliminada');
+    toast('Configuración de IA actualizada');
   } else if (key.startsWith('•')) {
-    toast('Ingresá la nueva key, no los puntos', 'error');
-    return;
+    toast('Modelo de IA guardado ✅');
   } else {
     localStorage.setItem('gemini_api_key', key);
-    toast('API Key guardada ✅');
+    toast('API Key y Modelo guardados ✅');
   }
   loadConfig();
 }
